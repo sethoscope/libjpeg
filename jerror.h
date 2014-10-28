@@ -45,6 +45,7 @@ JMESSAGE(JERR_BAD_ALLOC_CHUNK, "MAX_ALLOC_CHUNK is wrong, please fix")
 JMESSAGE(JERR_BAD_BUFFER_MODE, "Bogus buffer control mode")
 JMESSAGE(JERR_BAD_COMPONENT_ID, "Invalid component ID %d in SOS")
 JMESSAGE(JERR_BAD_CROP_SPEC, "Invalid crop request")
+JMESSAGE(JERR_BAD_PAD_SPEC, "Invalid pad request")
 JMESSAGE(JERR_BAD_DCT_COEF, "DCT coefficient out of range")
 JMESSAGE(JERR_BAD_DCTSIZE, "DCT scaled block size %dx%d not supported")
 JMESSAGE(JERR_BAD_DROP_SAMPLING,

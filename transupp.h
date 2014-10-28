@@ -102,7 +102,8 @@ typedef enum {
 	JXFORM_TRANSVERSE,	/* transpose across UR-to-LL axis */
 	JXFORM_ROT_90,		/* 90-degree clockwise rotation */
 	JXFORM_ROT_180,		/* 180-degree rotation */
-	JXFORM_ROT_270		/* 270-degree clockwise (or 90 ccw) */
+	JXFORM_ROT_270,		/* 270-degree clockwise (or 90 ccw) */
+	JXFORM_PAD      	/* add rows and columns of padding */
 } JXFORM_CODE;
 
 /*
@@ -131,6 +132,7 @@ typedef struct {
   boolean trim;			/* if TRUE, trim partial MCUs as needed */
   boolean force_grayscale;	/* if TRUE, convert color image to grayscale */
   boolean crop;			/* if TRUE, crop source image */
+  boolean pad;			/* if TRUE, expand image by some amount */
 
   /* Crop parameters: application need not set these unless crop is TRUE.
    * These can be filled in by jtransform_parse_crop_spec().
@@ -143,6 +145,15 @@ typedef struct {
   JCROP_CODE crop_xoffset_set;	/* (negative measures from right edge) */
   JDIMENSION crop_yoffset;	/* Y offset of selected region */
   JCROP_CODE crop_yoffset_set;	/* (negative measures from bottom edge) */
+
+  /* Pad parameters: application need not set these unless pad is TRUE.
+   * These can be filled in by jtransform_parse_pad_spec().
+   */
+  JDIMENSION pad_top;	        /* Amount to pad top of image */
+  JDIMENSION pad_bottom;	/* Amount to pad bottom of image */
+  JDIMENSION pad_left;      	/* Amount to pad left of image */
+  JDIMENSION pad_right;	        /* Amount to pad right side of image */
+
 
   /* Internal workspace: caller should not touch these */
   int num_components;		/* # of components in workspace */
@@ -160,6 +171,9 @@ typedef struct {
 
 /* Parse a crop specification (written in X11 geometry style) */
 EXTERN(boolean) jtransform_parse_crop_spec
+	JPP((jpeg_transform_info *info, const char *spec));
+/* Parse a crop specification */
+EXTERN(boolean) jtransform_parse_pad_spec
 	JPP((jpeg_transform_info *info, const char *spec));
 /* Request any required workspace */
 EXTERN(boolean) jtransform_request_workspace

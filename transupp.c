@@ -112,6 +112,71 @@ do_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
   }
 }
 
+LOCAL(void)
+do_pad (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
+        JDIMENSION pad_left, JDIMENSION pad_top,
+	 jvirt_barray_ptr *src_coef_arrays,
+	 jvirt_barray_ptr *dst_coef_arrays)
+/* pad: resize the image into a larger one, placing the source image
+ * somewhere in the middle, surrounded by padding */
+{
+  JDIMENSION dst_blk_y, x_block_offset, y_block_offset;
+  int ci;   /* component index */
+  int src_blk_y, y_cursor;
+  JBLOCKARRAY src_buffer, dst_buffer;
+  jpeg_component_info *compptr;
+  jpeg_component_info *src_compptr;
+  const size_t bytes_per_block = SIZEOF(JCOEF) * DCTSIZE2;
+
+  /* TODO: I don't fully understand where 16 comes from and whether
+   * it's always going to be correct.  In any case, there should only
+   * be meaningful constants here, not naked numbers. */
+  pad_top /= 16;   /* convert rows to blocks */
+  pad_left /= 16;  /* convert columns to blocks */
+
+  for (ci = 0; ci < dstinfo->num_components; ++ci) {
+    compptr = dstinfo->comp_info + ci;
+    src_compptr = srcinfo->comp_info + ci;
+
+    /* access the top rows in order to zero them */
+    for (y_cursor = 0; y_cursor < pad_top; ++y_cursor) {
+      /* one at a time to accommodate memory paging */
+      (*srcinfo->mem->access_virt_barray)
+        ((j_common_ptr) srcinfo, dst_coef_arrays[ci], y_cursor, 1, TRUE);
+    }
+
+    x_block_offset = pad_left * compptr->h_samp_factor;
+    y_block_offset = pad_top * compptr->v_samp_factor;
+
+    for (src_blk_y = 0; src_blk_y < src_compptr->height_in_blocks;
+	 src_blk_y += src_compptr->v_samp_factor) {
+
+      dst_buffer = (*dstinfo->mem->access_virt_barray)
+	((j_common_ptr) dstinfo, dst_coef_arrays[ci],
+         src_blk_y + y_block_offset,
+	 (JDIMENSION) compptr->v_samp_factor, TRUE);
+      src_buffer = (*srcinfo->mem->access_virt_barray)
+	((j_common_ptr) srcinfo, src_coef_arrays[ci],
+	 src_blk_y,
+	 (JDIMENSION) src_compptr->v_samp_factor, FALSE);
+
+      /* copy image data */
+      for (y_cursor = 0; y_cursor < compptr->v_samp_factor; ++y_cursor) {
+	jcopy_block_row(src_buffer[y_cursor],
+			dst_buffer[y_cursor + y_block_offset] + x_block_offset,
+			src_compptr->width_in_blocks);
+      }
+    }
+
+    /* access bottom rows to zero them */
+    for (y_cursor = pad_top + src_compptr->height_in_blocks;
+         y_cursor < compptr->height_in_blocks; ++y_cursor) {
+      /* one at a time to accommodate memory paging */
+      (*srcinfo->mem->access_virt_barray)
+        ((j_common_ptr) srcinfo, dst_coef_arrays[ci], y_cursor, 1, TRUE);
+    }
+  }
+}
 
 LOCAL(void)
 do_flip_h_no_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
@@ -832,6 +897,40 @@ jtransform_parse_crop_spec (jpeg_transform_info *info, const char *spec)
 }
 
 
+/* Parse a pad specification.
+ * The routine returns TRUE if the spec string is valid, FALSE if not.
+ *
+ * The crop spec string should have the format
+ *	<top>,<bottom>,<left>,<right>
+ * where each parameter is an unsigned integer.
+ */
+
+GLOBAL(boolean)
+jtransform_parse_pad_spec (jpeg_transform_info *info, const char *spec)
+{
+  info->pad = FALSE;
+  if (! jt_read_integer(&spec, &info->pad_top))
+    return FALSE;
+  if ( *spec++ != ',' )
+    return FALSE;
+  if (! jt_read_integer(&spec, &info->pad_bottom))
+    return FALSE;
+  if ( *spec++ != ',' )
+    return FALSE;
+  if (! jt_read_integer(&spec, &info->pad_left))
+    return FALSE;
+  if ( *spec++ != ',' )
+    return FALSE;
+  if (! jt_read_integer(&spec, &info->pad_right))
+    return FALSE;
+  /* We had better have gotten to the end of the string. */
+  if (*spec != '\0')
+    return FALSE;
+  info->pad = TRUE;
+  return TRUE;
+}
+
+
 /* Trim off any partial iMCUs on the indicated destination edge */
 
 LOCAL(void)
@@ -1006,6 +1105,25 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
     info->y_crop_offset = 0;
   }
 
+
+  /* If padding has been requested, compute the new image dimensions,
+   * ensuring that each dimension grows by a whole number of iMCUs.
+   */
+  if (info->pad) {
+    /* Ensure parameters are valid */
+    if (info->pad_top < 0 || info->pad_bottom < 0 ||
+        info->pad_left < 0 || info->pad_right < 0)
+      ERREXIT(srcinfo, JERR_BAD_PAD_SPEC);
+    /* Now adjust everything to fall on iMCU boundaries */
+    info->pad_top -= info->pad_top % info->iMCU_sample_height;
+    info->pad_bottom -= info->pad_top % info->iMCU_sample_height;
+    info->pad_left -= info->pad_left % info->iMCU_sample_width;
+    info->pad_right -= info->pad_right % info->iMCU_sample_width;
+
+    info->output_height += info->pad_top + info->pad_bottom;
+    info->output_width += info->pad_left + info->pad_right;
+  }
+
   /* Figure out whether we need workspace arrays,
    * and if so whether they are transposed relative to the source.
    */
@@ -1066,6 +1184,9 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
     /* Need workspace arrays having transposed dimensions. */
     need_workspace = TRUE;
     transpose_it = TRUE;
+    break;
+  case JXFORM_PAD:
+    need_workspace = TRUE;
     break;
   }
 
@@ -1462,6 +1583,10 @@ jtransform_execute_transform (j_decompress_ptr srcinfo,
   case JXFORM_ROT_270:
     do_rot_270(srcinfo, dstinfo, info->x_crop_offset, info->y_crop_offset,
 	       src_coef_arrays, dst_coef_arrays);
+    break;
+  case JXFORM_PAD:
+    do_pad(srcinfo, dstinfo, info->pad_left, info->pad_top, 
+           src_coef_arrays, dst_coef_arrays);
     break;
   }
 }

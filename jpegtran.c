@@ -66,6 +66,7 @@ usage (void)
   fprintf(stderr, "Switches for modifying the image:\n");
 #if TRANSFORMS_SUPPORTED
   fprintf(stderr, "  -crop WxH+X+Y  Crop to a rectangular subarea\n");
+  fprintf(stderr, "  -pad TOP,BOTTOM,LEFT,RIGHT  Add rows and columns of black pixels\n");
   fprintf(stderr, "  -grayscale     Reduce to grayscale (omit color data)\n");
   fprintf(stderr, "  -flip [horizontal|vertical]  Mirror image (left-right or top-bottom)\n");
   fprintf(stderr, "  -perfect       Fail if there is non-transformable edge blocks\n");
@@ -143,6 +144,7 @@ parse_switches (j_compress_ptr cinfo, int argc, char **argv,
   transformoption.trim = FALSE;
   transformoption.force_grayscale = FALSE;
   transformoption.crop = FALSE;
+  transformoption.pad = FALSE;
   cinfo->err->trace_level = 0;
 
   /* Scan command line options, adjust parameters */
@@ -192,6 +194,20 @@ parse_switches (j_compress_ptr cinfo, int argc, char **argv,
 		progname, argv[argn]);
 	exit(EXIT_FAILURE);
       }
+#else
+      select_transform(JXFORM_NONE);	/* force an error */
+#endif
+    } else if (keymatch(arg, "pad", 2)) {
+      /* Perform image padding */
+#if TRANSFORMS_SUPPORTED
+      if (++argn >= argc)	/* advance to next argument */
+	usage();
+      if (! jtransform_parse_pad_spec(&transformoption, argv[argn])) {
+	fprintf(stderr, "%s: bogus -pad argument '%s'\n",
+		progname, argv[argn]);
+	exit(EXIT_FAILURE);
+      }
+      select_transform(JXFORM_PAD);  /* maybe later we can multitask */
 #else
       select_transform(JXFORM_NONE);	/* force an error */
 #endif
